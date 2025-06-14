@@ -1,0 +1,166 @@
+# === Libraries ===
+library(readxl)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(rstatix)
+library(readr)
+
+# === Load and clean data ===
+df <- read_excel("Volume_ratio.xlsx", skip = 1) %>%
+  rename_with(~ gsub(" ", "_", str_trim(.))) %>%  # Trim and replace spaces with underscores
+  mutate(
+    Animal = str_extract(Original_Image_Name, "SL_16_(\\d+)") %>% str_remove("SL_16_"),
+    ImageTime = str_extract(Original_Image_Name, "\\d{2}\\.\\d{2}\\.\\d{2}")
+  )
+
+# === Filter and label ===
+df <- df %>%
+  filter(Surpass_Object %in% c("PV DP Soma", "PV DP Process", "PV ML Soma", "PV ML Process")) %>%
+  mutate(
+    Type = if_else(str_detect(Surpass_Object, "DP"), "DP", "ML"),
+    Compartment = if_else(str_detect(Surpass_Object, "Soma"), "Soma", "Process")
+  )
+
+# === Compute mean Volume_ratio per image per group ===
+df_summary <- df %>%
+  group_by(Animal, ImageTime, Type, Compartment) %>%
+  summarise(Mean_Volume_ratio = mean(Volume_ratio, na.rm = TRUE), .groups = "drop")
+
+# === Compute per-animal average for each group ===
+df_filtered_animals <- df_summary %>%
+  group_by(Animal, Type, Compartment) %>%
+  summarise(Mean_Volume_ratio = mean(Mean_Volume_ratio), .groups = "drop") %>%
+  group_by(Animal) %>%
+  filter(n() == 4) %>%
+  ungroup() %>%
+  mutate(
+    Group = paste(Type, Compartment),
+    Group = factor(Group, levels = c("DP Process", "DP Soma", "ML Process", "ML Soma"))
+  )
+
+# === Run ANOVA on Volume ratio ===
+anova_result <- anova_test(
+  data = df_filtered_animals,
+  dv = Mean_Volume_ratio,
+  wid = Animal,
+  within = c(Type, Compartment)
+)
+print("=== ANOVA Results ===")
+print(anova_result)
+
+
+# === Pairwise comparisons ===
+pairwise_res <- df_filtered_animals %>%
+  pairwise_t_test(
+    Mean_Volume_ratio ~ Group,
+    paired = TRUE,
+    p.adjust.method = "bonferroni",
+    detailed = TRUE  # ✅ this adds conf.low and conf.high
+  ) %>%
+  add_xy_position(x = "Group", fun = "mean")
+
+
+
+
+colnames(pairwise_res)
+
+# === Automatically stack significance lines with spacing ===
+pairwise_res <- pairwise_res %>%
+  mutate(y.position = seq(
+    from = max(df_filtered_animals$Mean_Volume_ratio, na.rm = TRUE) + 0.05,
+    by = 0.08,
+    length.out = n()
+  ))
+
+
+# === Plot Colors ===
+group_colors <- c(
+  "DP Soma" = "#215476",
+  "ML Soma" = "#43909d",
+  "DP Process" = "#b3bbd2",
+  "ML Process" = "#e2cde8"
+)
+
+pairwise_res <- pairwise_res %>%
+  mutate(y.position = y.position +0.2)  # increase this value if still overlapping
+
+
+# === Create plot ===
+p <- ggplot(df_filtered_animals, aes(x = Group, y = Mean_Volume_ratio)) +
+  geom_violin(trim = FALSE, scale = "width", color = "black", aes(fill = Group)) +
+  geom_boxplot(width = 0.15, color = "black", fill = "white", outlier.shape = NA, aes(fill = Group)) +
+  geom_jitter(size = 3, shape = 21, stroke = 1, color = "black", fill = "white", width = 0.15) +
+  stat_pvalue_manual(pairwise_res, label = "p.adj.signif", tip.length = 0.01) +
+  scale_fill_manual(values = group_colors) +
+  scale_y_continuous(
+    name = "Overlapped Volume Ratio per Compartment per Animal",
+    limits = c(0, 2),  # adjust max based on your actual max value
+    breaks = seq(0, 2, by = 0.5),
+    expand = c(0, 0)
+  )+
+  xlab("") +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid = element_blank(),  # ✅ REMOVE GREY GRID
+    axis.line = element_line(size = 1.2, color = "black"),
+    axis.ticks.y = element_line(color = "black"),
+    axis.text = element_text(size = 12),
+    axis.title.y = element_text(size = 14, face = "bold"),
+    legend.position = "none"
+  )
+
+
+
+# === Show and save plot ===
+print(p)
+ggsave("DP_ML_Volume ratio_distribution_comparison_ANOVA.svg", plot = p, width = 8, height = 6, dpi = 300)
+
+# === Debug check ===
+str(pairwise_res)
+str(df_filtered_animals)
+colnames(df_filtered_animals)
+
+# === Format pairwise results for CSV ===
+# Compute group means
+group_means <- df_filtered_animals %>%
+  group_by(Group) %>%
+  summarise(Mean = mean(Mean_Volume_ratio), .groups = "drop")
+
+# Merge group means into pairwise results
+formatted_pairwise <- pairwise_res %>%
+  left_join(group_means, by = c("group1" = "Group")) %>%
+  rename(Mean_1 = Mean) %>%
+  left_join(group_means, by = c("group2" = "Group")) %>%
+  rename(Mean_2 = Mean) %>%
+  mutate(
+    Comparison = paste(group1, "vs", group2),
+    `Difference (±SEM)` = sprintf("%.2f ± %.2f", 
+                                  Mean_1 - Mean_2, 
+                                  sd(df_filtered_animals$Mean_Volume_ratio, na.rm = TRUE) / sqrt(length(unique(df_filtered_animals$Animal)))
+    ),
+    `95% CI` = paste0(round(conf.low, 2), " to ", round(conf.high, 2)),
+    `t, df` = sprintf("t=%.3f, df=%.0f", statistic, df),
+    `R² (eta squared)` = round(statistic^2 / (statistic^2 + df), 4),
+    `Significant (P < 0.05)` = ifelse(p.adj < 0.05, "Yes", "No"),
+    `p-value (adj)` = signif(p.adj, 4)
+  ) %>%
+  select(
+    ANOVA = p,  # From overall ANOVA
+    Comparison,
+    Mean_1,
+    Mean_2,
+    `Difference (±SEM)`,
+    `95% CI`,
+    `t, df`,
+    `R² (eta squared)`,
+    `Significant (P < 0.05)`,
+    `p-value (adj)`
+  ) %>%
+  mutate(ANOVA = signif(anova_result$p, 4)[1])  # Add ANOVA p-value to every row
+
+# === Save CSV ===
+write_csv(formatted_pairwise, "ANOVA_Mean Volume ratio Comparison per Group per Animal.csv")
+
+
