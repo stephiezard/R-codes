@@ -124,7 +124,7 @@ for (pair in col_pairs) {
   som_vals <- df[[som_col]]
   common_title <- get_common_title(pv_col, som_col)
   
-  t_res <- t.test(pv_vals, som_vals, var.equal = TRUE)
+  t_res <- t.test(pv_vals, som_vals, var.equal = FALSE)
   n_pv <- sum(!is.na(pv_vals))
   n_som <- sum(!is.na(som_vals))
   
