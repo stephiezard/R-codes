@@ -31,7 +31,7 @@ feature_groups <- column_info %>%
   filter(all(group_names %in% group)) %>%
   group_split()
 
-cat("🦰 Found", length(feature_groups), "valid 4-group column sets.\n")
+cat("Found", length(feature_groups), "valid 4-group column sets.\n")
 
 # === Plotting Loop ===
 all_t_tests <- list()
