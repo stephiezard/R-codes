@@ -41,7 +41,7 @@ while (i <= (ncol(df) - 1)) {
 }
 
 cat("🧠 Found", length(col_pairs), "PV/SOM pairs.\n")
-if (length(col_pairs) == 0) stop("❌ No valid PV/SOM column pairs found.")
+if (length(col_pairs) == 0) stop("No valid PV/SOM column pairs found.")
 
 # Custom color palette
 group_colors <- c(
