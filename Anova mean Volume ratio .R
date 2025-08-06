@@ -57,7 +57,7 @@ pairwise_res <- df_filtered_animals %>%
     Mean_Volume_ratio ~ Group,
     paired = TRUE,
     p.adjust.method = "bonferroni",
-    detailed = TRUE  # ✅ this adds conf.low and conf.high
+    detailed = TRUE  #  this adds conf.low and conf.high
   ) %>%
   add_xy_position(x = "Group", fun = "mean")
 
@@ -103,7 +103,7 @@ p <- ggplot(df_filtered_animals, aes(x = Group, y = Mean_Volume_ratio)) +
   xlab("") +
   theme_minimal(base_size = 14) +
   theme(
-    panel.grid = element_blank(),  # ✅ REMOVE GREY GRID
+    panel.grid = element_blank(),  #  REMOVE GREY GRID
     axis.line = element_line(size = 1.2, color = "black"),
     axis.ticks.y = element_line(color = "black"),
     axis.text = element_text(size = 12),
